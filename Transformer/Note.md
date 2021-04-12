@@ -109,3 +109,83 @@ Encoder的结构中细分为多个block，每个block内含self-attention模块�
 实际上，在attention层后，输出会和其对应的输入作加，这也叫做**残差（residual）**机制。接下来该合成输出会经过layer norm，对输入序列这一维度（而不是序列间）作标准化，即对每一个序列的不同维度合起来标准化。另外，输出后的结果进入全连接层后，同样要经过residual和layer norm。这就是Transformer中的Add&Norm层。
 
 <img src="image-20210409224617091.png" alt="image-20210409224617091" style="zoom:25%;" />
+
+### Decoder
+
+Decoder分为两种：Autoregressive（AT）与Non-Autoregressive（NAT）。
+
+#### Autoregressive (AT)
+
+首先需要明确，Decoder吐出的输出是所需输出集合内所有元素的概率分布。例如对于输出中文的翻译任务，输出的每一个向量都是包含所需中文字集合（由训练者确定范围）的向量，每个元素位的数值代表不同文字的概率。
+
+<img src="image-20210412145026067.png" alt="image-20210412145026067" style="zoom:25%;" />
+
+AT形式的Transformer中，Decoder产生输出的过程为：给定一个起始符号（START），让机器通过读取Encoder的信息，输出第一个结果向量；将第一个结果向量和起始符号连接作为输入，输出第二个结果向量...以此类推，直到输出一个结束符号（END）。
+
+需要注意的是，Decoder的组成中，包含一个Masked Multi-Head Attention。联想AT Decoder的工作过程，在输出“机器学习”这四个字的时候，对于第一个字“机”，我们实际上只给Decoder一个输入：起始符号。也就是说，每一个输出对应的输入不再是全体输入，而仅仅是其对应输入位左边的所有内容。所以使用一个Masked模块阻止输入不足时多余模块的计算。
+
+<img src="image-20210412145743140.png" alt="image-20210412145743140" style="zoom:25%;" />
+
+#### Non-autoregressive (NAT)
+
+虽然AT Decoder自行决定其输出长度，但有可能不断输出而难以停下。另外AT方法的输出是由其输入串行决定的。所以NAT的形式应运而生：通过在一开始给定所有位置均为START的token，让模型在读取Encoder内容的同时，决定所有位置的输出。该过程显然比AT更高效，但是如何决定输出长度又成为问题。一种方法是在网络中接收Encoder的序列长度，通过某个分类器学习判定输出长度交给Decoder；另一种方法为给定一个较长序列，将输出结果内结束符右侧的所有输出抛弃。NAT的性能始终不如AT，所以仍然有待研究。
+
+<img src="image-20210412150108073.png" alt="image-20210412150108073" style="zoom:25%;" />
+
+### Encoder-Decoder的链接
+
+在Encoder向Decoder传输数据的过程中，实际上是将输出的向量再次进行QKV操作。首先，Decoder吃下输入，给出其对应的$\boldsymbol{q}$，而Encoder从产生的输出向量中再次产生不同的$\boldsymbol{k}$和$\boldsymbol{v}$，通过$\boldsymbol{q}$进行和attention机制类似的计算，达到一种考虑所有Encoder输出信息的目的。这也称为**Cross Attention**。
+
+<img src="image-20210412154055825.png" alt="image-20210412154055825" style="zoom:25%;" />
+
+另外，无论Encoder还是Decoder都可以有不止一层。Decoder不一定只接收Encoder的最后一层。不同层之间的连接方式较多，此处不赘述。
+
+### 如何训练
+
+以中文输出为例。在训练时，比较的label为包含所有文字的one-hot向量，而Decoder的输出为同样文字顺序的distribution向量。因此所需工作就是最小化二者之间的cross-entropy。
+
+**Teacher Forcing**
+
+<img src="image-20210412154739961.png" alt="image-20210412154739961" style="zoom:25%;" />
+
+训练中，Decoder吃进的输入是训练者给定的ground truth，即使用正确答案进行训练，而非使用Decoder自己的上一个输出当作下一个输入。
+
+### Tips
+
+**Copy Mechanism**
+
+在文字生成类的任务中，实际上并不需要机器对所有文字都了解才能生成。例如机器翻译和聊天机器人，它们在收到人名讯息后，只要学习如何在回复的句式中放置这些专有名词即可。生成文章摘要任务同理，摘要中的大部分讯息均来自于原文，这只需要提炼和复制的技巧。
+
+<img src="image-20210412154957023.png" alt="image-20210412154957023" style="zoom:25%;" />
+
+**Guided Attention**
+
+因为Attention考虑所有时序关系，所以机器有可能会错误地先考虑句子后头的时序。人为规定不同位置attention的区别可以避免这一问题，即引导机器进行学习。
+
+<img src="image-20210412155200382.png" alt="image-20210412155200382" style="zoom:25%;" />
+
+**Beam Search**
+
+编码总找到分数最高的那一个结果来开启下一个输出，这是一种贪婪思想。但是有可能分数次高者在下一步对应的新输出能够有更高的置信度。这种折衷的想法催生了Beam Search的应用。其通过合理的规划、搜索，试图找出生成一个序列的总分数最高的方法。
+
+<img src="image-20210412155331446.png" alt="image-20210412155331446" style="zoom:25%;" />
+
+**Sampling**
+
+当然，实际上并非分数最高的token序列能带来最好的结果。例如句式填充或机器文章生成任务，只选择高分路径有可能让生成结果成为一堆废话。老师提到，一般对于有确定输入输出关系的任务（如语音辨识）可以将准确率分数当做评判标准；但对于需要机器发挥创造力的工作，加入一些随机性也许更好。
+
+<img src="image-20210412155551960.png" alt="image-20210412155551960" style="zoom:25%;" />
+
+一句哲言：“万事非完美，而瑕疵之中隐藏着美好。”
+
+**Optimizing Evaluation Metrics**
+
+训练时候对于输出序列用的是每个序列元素和目标元素间作交叉熵，而对于句式生成任务，可能在测试时的标准是句子的匹配分数。这些区别会导致训练和测试的目标不一致。但这种匹配分数无法微分，较难训练，RL可能可以解决。因为过于复杂，这里不再深入。
+
+<img src="image-20210412155934113.png" alt="image-20210412155934113" style="zoom:25%;" />
+
+**Scheduled Sampling**
+
+如果在训练时仅给出正确的输入，Decoder在真正执行任务时假如发现错误的信息，就可能难以抵抗。所以有必要在训练时引入一点小错误，使其更加鲁棒。
+
+<img src="image-20210412160134326.png" alt="image-20210412160134326" style="zoom:25%;" />
