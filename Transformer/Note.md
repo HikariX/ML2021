@@ -70,7 +70,7 @@ DL中还有一个概念称为Internal Covariate Shift，即，当优化网络参
 
 聊天机器人（chatbot）通过接收上下文对话，可以学习一种应答机制。这种输出长度不限的问题就可以通过seq2seq解决。
 
-***Question Answering***
+**Question Answering**
 
 实际上，该类问题被称为问答。例如翻译、文章摘要提炼、文章内容属性判断等。最极端下只有一个输出，但seq2seq均能够胜任。
 
